@@ -43,6 +43,17 @@ woodcutter-settings:
   disabled-worlds:
     - world_name
 
+  # Dynamic tree-size based mechanics.
+  # The number of hits required and the payment scale with the number of logs in the tree.
+  tree-size:
+    # How many hits per log. Example: 0.25 = 1 hit per 4 logs (tree of 20 logs → 5 hits).
+    # Set to 0 to disable and use the static needBreak value from the region database.
+    breaks-per-log: 0.25
+    # Extra earn added per log on top of the region's base earn.
+    # Example: 0.5 = tree of 20 logs adds 10.0 to base earn.
+    # Set to 0 to disable and use only the static earn from the region database.
+    earn-per-log: 0.5
+
 # For WORLD Mode
 # Without animations
 world-settings:

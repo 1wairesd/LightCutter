@@ -7,9 +7,11 @@ enum class EconomyType {
     PLAYERPOINTS;
 
     companion object {
-        private val economyTypeWithConfig: String = Main.getInstance().config.getString("woodcutter-settings.economy")?.uppercase() ?: "VAULT"
+        // Read config on every call — fixes lazy val ignoring /reload
         fun getCurrent(): EconomyType {
-            return EconomyType.entries.find { it.name == economyTypeWithConfig } ?: VAULT
+            val type = Main.getInstance().config
+                .getString("woodcutter-settings.economy")?.uppercase() ?: "VAULT"
+            return entries.find { it.name == type } ?: VAULT
         }
     }
 }

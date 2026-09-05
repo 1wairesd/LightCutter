@@ -23,6 +23,7 @@ repositories {
     maven("https://repo.papermc.io/repository/maven-public/")
     maven("https://jitpack.io/")
     maven("https://maven.enginehub.org/repo/")
+    maven("https://repo.extendedclip.com/content/repositories/placeholderapi/")
 }
 
 dependencies {
@@ -33,16 +34,16 @@ dependencies {
     compileOnly("net.kyori:adventure-api:$adventureVersion")
     compileOnly("net.kyori:adventure-text-minimessage:$adventureVersion")
     compileOnly("net.kyori:adventure-platform-bukkit:$adventureBukkitVersion")
+    implementation("net.kyori:adventure-text-serializer-legacy:$adventureVersion")
+
     compileOnly("com.zaxxer:HikariCP:$hikariCPVersion")
-
     compileOnly("com.sk89q.worldguard:worldguard-bukkit:7.0.9")
-
     compileOnly("com.mysql:mysql-connector-j:$mysqlConnectorVersion")
 
+    // Vault
+    compileOnly("com.github.MilkBowl:VaultAPI:1.7")
+
     implementation(project(":api"))
-    implementation(files(
-        "C:/Users/danny/IdeaProjects/.Kotlin/.private/LightLibrary/bukkit/build/libs/LightLibraryBukkit-PUBLIC-1.0.jar"
-    ))
 }
 
 val javaVersion = 17
@@ -60,7 +61,7 @@ tasks {
             "com.zaxxer:HikariCP:${hikariCPVersion}",
             "net.kyori:adventure-text-minimessage:${adventureVersion}",
             "net.kyori:adventure-platform-bukkit:${adventureBukkitVersion}",
-            "net.kyori:adventure-text-minimessage:${adventureVersion}",
+            "net.kyori:adventure-text-serializer-legacy:${adventureVersion}",
             "com.mysql:mysql-connector-j:${mysqlConnectorVersion}"
         )
         val props = mapOf(
@@ -82,16 +83,12 @@ tasks {
         archiveBaseName.set(project.name)
         archiveFileName.set("${project.name}-${project.version}.jar")
 
-        exclude("META-INF/maven/**",
-                "META-INF/INFO_BIN",
-                "META-INF/INFO_SRC",
-                "kotlin/**"
+        exclude(
+            "META-INF/maven/**",
+            "META-INF/INFO_BIN",
+            "META-INF/INFO_SRC",
+            "kotlin/**"
         )
         mergeServiceFiles()
-
-        val shadedPath = "ru.kainlight.${project.name.lowercase()}.shaded"
-        relocate("ru.kainlight.lightlibrary", "$shadedPath.lightlibrary")
-        relocate("org.mariadb.jdbc", "$shadedPath.database")
     }
 }
-

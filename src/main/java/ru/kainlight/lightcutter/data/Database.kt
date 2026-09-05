@@ -2,29 +2,26 @@ package ru.kainlight.lightcutter.data
 
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
+import ru.kainlight.lightcutter.Debug
 import ru.kainlight.lightcutter.Main
 import ru.kainlight.lightcutter.api.IRegion
 import ru.kainlight.lightcutter.api.Region
 import ru.kainlight.lightcutter.api.RegionHandler
-import ru.kainlight.lightlibrary.UTILS.DebugBukkit
-import ru.kainlight.lightlibrary.UTILS.useCatching
 import java.io.File
 import java.io.IOException
+import java.sql.PreparedStatement
+import java.sql.ResultSet
 import java.util.concurrent.ConcurrentHashMap
 
 @Suppress("UNUSED")
 internal class Database(private val plugin: Main) : RegionHandler {
 
-    init {
-        initializeCache()
-    }
-
-    private val host: String = plugin.config.getString("database-settings.host", "localhost") !!
+    private val host: String = plugin.config.getString("database-settings.host", "localhost")!!
     private val port: Int = plugin.config.getInt("database-settings.port", 3306)
-    private val base: String = plugin.config.getString("database-settings.base", "lightcutter") !!
+    private val base: String = plugin.config.getString("database-settings.base", "lightcutter")!!
 
     private var dataSource: HikariDataSource? = null
-    private val config: HikariConfig = HikariConfig()
+    private val hikariConfig: HikariConfig = HikariConfig()
 
     private val columnName = "lightcutter_regions"
 
@@ -32,14 +29,14 @@ internal class Database(private val plugin: Main) : RegionHandler {
     private val caching: Boolean = plugin.config.getBoolean("database-settings.caching", false)
 
     private fun configureDataSource(driverClassName: String, jdbcUrl: String, sqlite: Boolean = false) {
-        config.driverClassName = driverClassName
-        config.jdbcUrl = if (sqlite) "jdbc:sqlite://$jdbcUrl" else "$jdbcUrl$host:$port/$base"
-        config.username = plugin.config.getString("database-settings.user", "root") !!
-        config.password = plugin.config.getString("database-settings.password", "") !!
-        config.maximumPoolSize = plugin.config.getInt("database-settings.pool-size", 2)
-        config.poolName = "LightCutter-Pool"
+        hikariConfig.driverClassName = driverClassName
+        hikariConfig.jdbcUrl = if (sqlite) "jdbc:sqlite://$jdbcUrl" else "$jdbcUrl$host:$port/$base"
+        hikariConfig.username = plugin.config.getString("database-settings.user", "root")!!
+        hikariConfig.password = plugin.config.getString("database-settings.password", "")!!
+        hikariConfig.maximumPoolSize = plugin.config.getInt("database-settings.pool-size", 2)
+        hikariConfig.poolName = "LightCutter-Pool"
 
-        dataSource = HikariDataSource(config)
+        dataSource = HikariDataSource(hikariConfig)
     }
 
     fun connect() {
@@ -49,11 +46,11 @@ internal class Database(private val plugin: Main) : RegionHandler {
             "postgresql" -> configureDataSource("org.postgresql.Driver", "jdbc:postgresql://")
             "sqlite" -> {
                 val dbFile = File(plugin.dataFolder, "$base.db")
-                if (! dbFile.exists()) {
+                if (!dbFile.exists()) {
                     try {
                         dbFile.createNewFile()
                     } catch (e: IOException) {
-                        DebugBukkit.error(e.message.toString())
+                        Debug.error(e.message.toString(), e)
                     }
                 }
                 configureDataSource("org.sqlite.JDBC", dbFile.absolutePath, true)
@@ -65,11 +62,11 @@ internal class Database(private val plugin: Main) : RegionHandler {
         try {
             if (isConnected()) dataSource?.close()
         } catch (e: Exception) {
-            DebugBukkit.error(e.message.toString())
+            Debug.error(e.message.toString(), e)
         }
     }
 
-    private fun isConnected(): Boolean = dataSource != null && ! (dataSource?.isClosed ?: true)
+    private fun isConnected(): Boolean = dataSource != null && !(dataSource?.isClosed ?: true)
 
     fun createTables() {
         executeUpdate(
@@ -92,8 +89,8 @@ internal class Database(private val plugin: Main) : RegionHandler {
         }
         val region = IRegion(name, earn, needBreak, cooldown)
 
-        return if(rowsAffected > 0) {
-            if(caching) cache.put(name, region)
+        return if (rowsAffected > 0) {
+            if (caching) cache[name] = region
             region
         } else null
     }
@@ -115,7 +112,7 @@ internal class Database(private val plugin: Main) : RegionHandler {
             it.setInt(3, region.cooldown)
             it.setString(4, region.name)
         }
-        if (caching && rowsAffected > 0) cache.put(region.name, region)
+        if (caching && rowsAffected > 0) cache[region.name] = region
         return rowsAffected
     }
 
@@ -132,7 +129,7 @@ internal class Database(private val plugin: Main) : RegionHandler {
 
     override fun getRegion(name: String): Region? {
         return if (caching) {
-            cache.get(name) ?: fetchRegionFromDatabase(name)?.also { cache.put(name, it) }
+            cache[name] ?: fetchRegionFromDatabase(name)?.also { cache[name] = it }
         } else {
             fetchRegionFromDatabase(name)
         }
@@ -142,7 +139,7 @@ internal class Database(private val plugin: Main) : RegionHandler {
         return if (caching) cache.values.toList() else fetchAllRegionsFromDatabase()
     }
 
-    private fun initializeCache() {
+    internal fun initializeCache() {
         if (caching) {
             fetchAllRegionsFromDatabase().forEach { region ->
                 cache[region.name] = region
@@ -154,53 +151,64 @@ internal class Database(private val plugin: Main) : RegionHandler {
         return executeQuery(
             "SELECT * FROM $columnName WHERE region_name = ?",
             { it.setString(1, name) }
-        ) { resultSet ->
+        ) { rs ->
             IRegion(
-                name = resultSet.getString("region_name"),
-                earn = resultSet.getString("earn"),
-                needBreak = resultSet.getInt("need_break"),
-                cooldown = resultSet.getInt("cooldown")
+                name = rs.getString("region_name"),
+                earn = rs.getString("earn"),
+                needBreak = rs.getInt("need_break"),
+                cooldown = rs.getInt("cooldown")
             )
         }
     }
 
     private fun fetchAllRegionsFromDatabase(): List<Region> {
-        return executeQuery("SELECT * FROM $columnName", mapper = { resultSet ->
+        return executeQuery("SELECT * FROM $columnName", mapper = { rs ->
             mutableListOf<IRegion>().apply {
                 do {
                     add(
                         IRegion(
-                            name = resultSet.getString("region_name"),
-                            earn = resultSet.getString("earn"),
-                            needBreak = resultSet.getInt("need_break"),
-                            cooldown = resultSet.getInt("cooldown")
+                            name = rs.getString("region_name"),
+                            earn = rs.getString("earn"),
+                            needBreak = rs.getInt("need_break"),
+                            cooldown = rs.getInt("cooldown")
                         )
                     )
-                } while (resultSet.next())
+                } while (rs.next())
             }
         }) ?: emptyList()
     }
 
-    private fun <T> executeQuery(sql: String, setter: (java.sql.PreparedStatement) -> Unit = {}, mapper: (java.sql.ResultSet) -> T?): T? {
-        dataSource?.connection.useCatching { connection ->
-            connection?.prepareStatement(sql).useCatching { statement ->
-                setter(statement !!)
-                statement.executeQuery().useCatching { resultSet ->
-                    return if (resultSet.next()) mapper(resultSet) else null
+    private fun <T> executeQuery(
+        sql: String,
+        setter: (PreparedStatement) -> Unit = {},
+        mapper: (ResultSet) -> T?
+    ): T? {
+        try {
+            dataSource?.connection?.use { connection ->
+                connection.prepareStatement(sql).use { stmt ->
+                    setter(stmt)
+                    stmt.executeQuery().use { rs ->
+                        return if (rs.next()) mapper(rs) else null
+                    }
                 }
             }
+        } catch (e: Exception) {
+            Debug.error("Database query error: ${e.message}", e)
         }
         return null
     }
 
-    private fun executeUpdate(sql: String, setter: (java.sql.PreparedStatement) -> Unit = {}): Int {
-        dataSource?.connection.useCatching { connection ->
-            connection?.prepareStatement(sql).useCatching { statement ->
-                setter(statement !!)
-                return statement.executeUpdate()
+    private fun executeUpdate(sql: String, setter: (PreparedStatement) -> Unit = {}): Int {
+        try {
+            dataSource?.connection?.use { connection ->
+                connection.prepareStatement(sql).use { stmt ->
+                    setter(stmt)
+                    return stmt.executeUpdate()
+                }
             }
+        } catch (e: Exception) {
+            Debug.error("Database update error: ${e.message}", e)
         }
         return 0
     }
 }
-

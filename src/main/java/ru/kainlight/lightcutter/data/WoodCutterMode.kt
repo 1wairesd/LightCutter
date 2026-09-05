@@ -7,8 +7,11 @@ internal enum class WoodCutterMode {
     REGION;
 
     companion object {
-
-        private val configMode: String by lazy { Main.getInstance().config.getString("woodcutter-settings.mode")?.uppercase() ?: "WORLD" }
-        fun getCurrent(): WoodCutterMode = WoodCutterMode.entries.find { it.name == configMode } ?: WORLD
+        // Read config on every call — fixes lazy val ignoring /reload
+        fun getCurrent(): WoodCutterMode {
+            val mode = Main.getInstance().config
+                .getString("woodcutter-settings.mode")?.uppercase() ?: "WORLD"
+            return entries.find { it.name == mode } ?: WORLD
+        }
     }
 }

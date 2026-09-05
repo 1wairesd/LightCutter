@@ -1,86 +1,111 @@
 package ru.kainlight.lightcutter
 
+import net.milkbowl.vault.economy.Economy
+import org.bukkit.Bukkit
+import org.bukkit.command.PluginCommand
+import org.bukkit.plugin.RegisteredServiceProvider
+import org.bukkit.plugin.java.JavaPlugin
 import ru.kainlight.lightcutter.api.ILightCutterAPI
 import ru.kainlight.lightcutter.api.LightCutterAPI
+import ru.kainlight.lightcutter.animations.TreeAnimation
 import ru.kainlight.lightcutter.commands.Completer
 import ru.kainlight.lightcutter.commands.MainCommand
 import ru.kainlight.lightcutter.data.Database
 import ru.kainlight.lightcutter.data.WoodCutterMode
 import ru.kainlight.lightcutter.listeners.BlockListener
-import ru.kainlight.lightlibrary.LightConfig
-import ru.kainlight.lightlibrary.LightPlugin
-import ru.kainlight.lightlibrary.UTILS.DebugBukkit
-import ru.kainlight.lightlibrary.UTILS.Parser
 import java.util.concurrent.CopyOnWriteArrayList
 
-class Main : LightPlugin() {
+class Main : JavaPlugin() {
 
     internal lateinit var database: Database
+    internal lateinit var messageConfig: LanguageConfig
+
+    /** Vault Economy service, set during onEnable. */
+    internal var vaultEconomy: Economy? = null
 
     val disabledWorlds = CopyOnWriteArrayList<String>()
 
-    override fun onLoad() {
-        this.saveDefaultConfig()
-        this.configurationVersion = 2.4
-        updateConfig()
-
-        LightConfig.saveLanguages(this, "main-settings.language")
-        messageConfig.configurationVersion = 2.1
-        messageConfig.updateConfig()
-    }
-
     override fun onEnable() {
         instance = this
-        setLightPluginInstance(this)
 
-        createBukkitAudience()
+        // Config
+        saveDefaultConfig()
 
-        this.reloadDatabase()
+        // Messages
+        messageConfig = LanguageConfig(this)
+
+        // Database
+        reloadDatabase()
+
+        // API
         LightCutterAPI.setProvider(ILightCutterAPI(this))
-        this.reloadConfigurations()
+
+        // Hook Vault
+        setupVault()
+
+        // Reload configs (messages + main config state)
+        reloadConfigurations()
 
         if (WoodCutterMode.getCurrent() == WoodCutterMode.REGION) {
             val regions = database.getRegions()
-            if(regions.isEmpty()) DebugBukkit.warn("The list of regions is empty")
-            else DebugBukkit.info("Regions " + regions.map { it.name } + " successfully loaded")
+            if (regions.isEmpty()) Debug.warn("The list of regions is empty")
+            else Debug.info("Regions " + regions.map { it.name } + " successfully loaded")
         }
 
-        this.registerCommand("lightcutter", MainCommand(this), Completer(this))
-        this.registerListener(BlockListener(this))
+        // Register command
+        val cmd: PluginCommand = getCommand("lightcutter")
+            ?: throw IllegalStateException("Command 'lightcutter' not found in plugin.yml")
+        val executor = MainCommand(this)
+        cmd.setExecutor(executor)
+        cmd.tabCompleter = Completer(this)
 
-        checkUpdates()
-        enableMessage()
+        // Register listener
+        Bukkit.getPluginManager().registerEvents(BlockListener(this), this)
+
+        logger.info("LightCutter v${description.version} enabled!")
     }
 
     override fun onDisable() {
+        TreeAnimation.cleanup()
         database.disconnect()
-
-        stop()
+        logger.info("LightCutter disabled.")
     }
 
     fun reloadConfigurations() {
-        this.saveDefaultConfig()
-        this.reloadConfig()
-        Parser.parseMode = this.config.getString("main-settings.parse_mode", "MINIMESSAGE")!!
-        DebugBukkit.isEnabled =  this.config.getBoolean("debug")
-        this.disabledWorlds.addAll(this.config.getStringList("woodcutter-settings.disabled-worlds"))
-
-        this.messageConfig.saveDefaultConfig()
-        this.messageConfig.reloadLanguage("main-settings.language")
-        this.messageConfig.reloadConfig()
+        saveDefaultConfig()
+        reloadConfig()
+        TextParser.parseMode = config.getString("main-settings.parse_mode", "MINIMESSAGE")!!
+        Debug.isEnabled = config.getBoolean("debug")
+        disabledWorlds.clear()
+        disabledWorlds.addAll(config.getStringList("woodcutter-settings.disabled-worlds"))
+        messageConfig.reload("main-settings.language")
     }
 
     internal fun reloadDatabase() {
         database = Database(this)
         database.connect()
         database.createTables()
+        database.initializeCache()
+    }
+
+    /** Returns the active messages config. */
+    internal fun getMessages(): LanguageConfig = messageConfig
+
+    private fun setupVault() {
+        if (server.pluginManager.getPlugin("Vault") == null) {
+            Debug.warn("Vault not found — economy features disabled.")
+            return
+        }
+        val rsp: RegisteredServiceProvider<Economy>? =
+            server.servicesManager.getRegistration(Economy::class.java)
+        vaultEconomy = rsp?.provider
+        if (vaultEconomy == null) Debug.warn("No Vault economy provider found.")
+        else Debug.info("Vault economy hooked: ${vaultEconomy!!.name}")
     }
 
     companion object {
         private lateinit var instance: Main
 
-        internal fun getInstance(): Main {
-            return instance
-        }
+        fun getInstance(): Main = instance
     }
 }

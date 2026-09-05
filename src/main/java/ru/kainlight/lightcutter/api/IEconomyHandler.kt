@@ -1,70 +1,90 @@
 package ru.kainlight.lightcutter.api
 
+import net.milkbowl.vault.economy.Economy
 import org.bukkit.entity.Player
+import ru.kainlight.lightcutter.Debug
 import ru.kainlight.lightcutter.Main
 import ru.kainlight.lightcutter.data.EconomyType
-import ru.kainlight.lightlibrary.API.ECONOMY.LightEconomy
-import ru.kainlight.lightlibrary.UTILS.DebugBukkit
-import ru.kainlight.lightlibrary.getAudience
-import ru.kainlight.lightlibrary.multiMessage
+import ru.kainlight.lightcutter.sendParsed
 import java.text.DecimalFormat
+import java.util.UUID
 import kotlin.random.Random
 
 internal class IEconomyHandler(val plugin: Main, val economy: EconomyType) : EconomyHandler {
 
-    override fun depositWithRegion(player: Player, earn: String) {
-        val cost = this.getOrRandomCost(earn)
-        val message = plugin.getMessages().getString("region.earn").orEmpty()
+    // #10 — cached so it's not re-created on every randomized payment
+    private val decimalFormat: DecimalFormat by lazy {
+        DecimalFormat(plugin.config.getString("woodcutter-settings.economy-format", "#.#")!!)
+    }
 
-        this.salary(player, cost, message)
+    override fun depositWithRegion(player: Player, earn: String) {
+        val cost = getOrRandomCost(earn)
+        val message = plugin.getMessages().getString("region.earn").orEmpty()
+        salary(player, cost, message)
     }
 
     override fun depositWithoutRegion(player: Player, blockName: String) {
-        val logName = plugin.getMessages()
-            .getString("log-names.$blockName")
+        val logName = plugin.getMessages().getString("log-names.$blockName")
             ?: "Unnamed block: $blockName"
-
-        val message = plugin.getMessages()
-            .getString("world.earn")
+        val message = plugin.getMessages().getString("world.earn")
             ?.replace("#block#", logName)
             .orEmpty()
-
-        val cost = this.getOrRandomCost(plugin.config.getString("world-settings.costs.$blockName"))
-
-        this.salary(player, cost, message)
+        val cost = getOrRandomCost(plugin.config.getString("world-settings.costs.$blockName"))
+        salary(player, cost, message)
     }
 
     private fun salary(player: Player, treeCost: Double, message: String) {
-        val treeCostInt: Int  = treeCost.toInt()
+        val treeCostInt: Int = treeCost.toInt()
 
-        val isDeposited = when (economy) {
-            EconomyType.VAULT -> LightEconomy.VAULT.deposit(player, treeCost)
-            EconomyType.PLAYERPOINTS -> LightEconomy.POINTS.deposit(player, treeCost)
+        val isDeposited: Boolean = when (economy) {
+            EconomyType.VAULT -> depositVault(player, treeCost)
+            EconomyType.PLAYERPOINTS -> depositPlayerPoints(player, treeCost)
         }
 
-        val formattedMessage = message.replace("#amount#", treeCost.toString())
+        val formattedMessage = message
+            .replace("#amount#", treeCost.toString())
             .replace("#amount_rounded#", treeCostInt.toString())
 
-        if (isDeposited) player.getAudience().multiMessage(formattedMessage)
-        else DebugBukkit.warn("Deposit problem")
+        if (isDeposited) player.sendParsed(formattedMessage)
+        else Debug.warn("Deposit problem for player ${player.name}")
+    }
+
+    private fun depositVault(player: Player, amount: Double): Boolean {
+        val eco: Economy = plugin.vaultEconomy ?: run {
+            Debug.warn("Vault economy is not available")
+            return false
+        }
+        return eco.depositPlayer(player, amount).transactionSuccess()
+    }
+
+    private fun depositPlayerPoints(player: Player, amount: Double): Boolean {
+        val pp = plugin.server.pluginManager.getPlugin("PlayerPoints") ?: run {
+            Debug.warn("PlayerPoints plugin not found")
+            return false
+        }
+        return try {
+            // Access PlayerPoints API via reflection to avoid compile-time dependency
+            val apiMethod = pp.javaClass.getMethod("getAPI")
+            val api = apiMethod.invoke(pp)
+            val giveMethod = api.javaClass.getMethod("give", UUID::class.java, Int::class.java)
+            giveMethod.invoke(api, player.uniqueId, amount.toInt()) as? Boolean ?: false
+        } catch (e: Exception) {
+            Debug.error("PlayerPoints deposit failed: ${e.message}", e)
+            false
+        }
     }
 
     private fun getOrRandomCost(costString: String?): Double {
-        if(costString.isNullOrEmpty()) return 0.0
+        if (costString.isNullOrEmpty()) return 0.0
 
-        //val random: Random = Random()
         if (costString.contains("-")) {
-            val parts: List<String> = costString.split("-")
-            val min: Double  = parts[0].toDouble()
-            val max: Double  = parts[1].toDouble()
-            val randomValue: Double = min + (max - min) * Random.nextDouble()
-
-            val format: String = plugin.config.getString("woodcutter-settings.economy-format", "#.#")!!
-            val df = DecimalFormat(format)
-            return df.format(randomValue).replace(",", ".").toDouble()
-        } else {
-            return costString.toDouble()
+            val parts = costString.split("-")
+            val min = parts[0].toDouble()
+            val max = parts[1].toDouble()
+            val randomValue = min + (max - min) * Random.nextDouble()
+            return decimalFormat.format(randomValue).replace(",", ".").toDouble()
         }
-    }
 
+        return costString.toDouble()
+    }
 }
