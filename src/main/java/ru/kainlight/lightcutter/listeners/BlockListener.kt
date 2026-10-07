@@ -88,22 +88,18 @@ internal class BlockListener(private val plugin: Main) : Listener {
                 TreeAnimation.scanLogCount(block)
             }
 
-            val breaksPerLog = plugin.config.getDouble("woodcutter-settings.tree-size.breaks-per-log", 0.25)
-            val earnPerLog = plugin.config.getDouble("woodcutter-settings.tree-size.earn-per-log", 0.0)
+            // needBreak = exact log count of the tree (1 hit per log)
+            val dynamicNeedBreak = logCount
 
-            val dynamicNeedBreak = if (breaksPerLog > 0.0)
-                maxOf(1, Math.ceil(logCount * breaksPerLog).toInt())
-            else
-                region.needBreak
-
-            val effectiveEarn: String = if (earnPerLog > 0.0) {
+            val earnMultiplier = plugin.config.getDouble("woodcutter-settings.earn-log-multiplier", 0.0)
+            val effectiveEarn = if (earnMultiplier > 0.0) {
                 val baseEarn = region.earn.toDoubleOrNull() ?: 0.0
-                (baseEarn + earnPerLog * logCount).toString()
+                (baseEarn * logCount * earnMultiplier).toString()
             } else {
                 region.earn
             }
 
-            Debug.info("Tree size: $logCount logs, dynamicNeedBreak=$dynamicNeedBreak, effectiveEarn=$effectiveEarn")
+            Debug.info("Tree size: $logCount logs, needBreak=$dynamicNeedBreak, effectiveEarn=$effectiveEarn (earnLogMultiplier=$earnMultiplier)")
 
             var blockCount = playerBlockCount.getOrDefault(countKey, dynamicNeedBreak)
             blockCount--
